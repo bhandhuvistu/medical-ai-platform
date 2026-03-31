@@ -1,8 +1,0 @@
-com\example\medicalai\contracts\SummarizeProcessingEvent.class
-com\example\medicalai\contracts\MedicalSummaryResponse.class
-com\example\medicalai\contracts\FileRef.class
-com\example\medicalai\contracts\ErrorResponse.class
-com\example\medicalai\contracts\SummarizeFailedEvent.class
-com\example\medicalai\contracts\SummarizeCompletedEvent.class
-com\example\medicalai\contracts\SummarizeRequestedEvent.class
-com\example\medicalai\contracts\JobStatusResponse.class

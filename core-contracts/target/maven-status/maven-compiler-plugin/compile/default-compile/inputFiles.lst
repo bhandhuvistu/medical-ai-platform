@@ -1,8 +1,8 @@
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\ErrorResponse.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\FileRef.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\JobStatusResponse.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\MedicalSummaryResponse.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeCompletedEvent.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeFailedEvent.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeProcessingEvent.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeRequestedEvent.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeRequestedEvent.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeFailedEvent.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\JobStatusResponse.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeProcessingEvent.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\MedicalSummaryResponse.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\SummarizeCompletedEvent.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\FileRef.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\core-contracts\src\main\java\com\example\medicalai\contracts\ErrorResponse.java
