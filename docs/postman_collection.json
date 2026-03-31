@@ -1,0 +1,52 @@
+{
+  "info": {
+    "name": "Medical AI Platform",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/auth/login"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"username\": \"demo\", \"password\": \"demo123\" }"
+        }
+      }
+    },
+    {
+      "name": "Upload Report",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8080/api/reports/upload"
+        },
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "files",
+              "type": "file",
+              "src": ""
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

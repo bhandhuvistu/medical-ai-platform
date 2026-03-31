@@ -1,0 +1,5 @@
+com\example\worker\util\ByteArrayMultipartFile.class
+com\example\medicalai\worker\config\KafkaSummarizeProducer.class
+com\example\medicalai\worker\messaging\SummaryStatusLogger.class
+com\example\medicalai\worker\WorkerApplication.class
+com\example\medicalai\worker\kafka\SummarizeConsumer.class
