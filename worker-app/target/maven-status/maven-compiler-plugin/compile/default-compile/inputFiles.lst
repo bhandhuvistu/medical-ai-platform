@@ -1,5 +1,5 @@
-C:\Users\hemanthga\Desktop\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\config\KafkaSummarizeProducer.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\kafka\SummarizeConsumer.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\messaging\SummaryStatusLogger.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\util\ByteArrayMultipartFile.java
-C:\Users\hemanthga\Desktop\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\WorkerApplication.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\WorkerApplication.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\util\ByteArrayMultipartFile.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\messaging\SummaryStatusLogger.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\kafka\SummarizeConsumer.java
+C:\Users\DELL\Desktop\api-service\medical-ai-platform\worker-app\src\main\java\com\example\medicalai\worker\config\KafkaSummarizeProducer.java

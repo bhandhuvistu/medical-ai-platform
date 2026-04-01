@@ -1,8 +1,12 @@
-com\example\medicalai\api\security\JwtService.class
+com\example\medicalai\api\dto\LoginResponse.class
+com\example\medicalai\api\service\UserService.class
 com\example\medicalai\api\controller\ReportController.class
 com\example\medicalai\api\config\KafkaSummarizeProducerApi.class
-com\example\medicalai\api\ApiApplication.class
+com\example\medicalai\api\dto\LoginRequest.class
 com\example\medicalai\api\controller\AuthController.class
-com\example\medicalai\api\controller\AuthController$LoginRequest.class
-com\example\medicalai\api\security\SecurityConfig.class
 com\example\medicalai\api\security\JwtAuthFilter.class
+com\example\medicalai\api\security\JwtService.class
+com\example\medicalai\api\dto\ResponseData.class
+com\example\medicalai\api\ApiApplication.class
+com\example\medicalai\api\controller\HomeController.class
+com\example\medicalai\api\security\SecurityConfig.class
