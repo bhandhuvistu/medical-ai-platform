@@ -5,10 +5,15 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  dockerImageName: 'medical-ai-platform:$(Build.BuildId)'
+  dockerRegistryServiceConnection: 'dockerhub'
+  imageRepository: 'bhandhuvistu/medical-ai-platform'
+  containerRegistry: 'docker.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildId)'
 
 stages:
   - stage: Build
+    displayName: Build Maven Project
     jobs:
       - job: BuildJob
         steps:
@@ -20,18 +25,48 @@ stages:
               jdkVersionOption: '17'
               publishJUnitResults: true
               testResultsFiles: '**/surefire-reports/TEST-*.xml'
-          
-          - task: Docker@2
-            inputs:
-              command: 'build'
-              Dockerfile: '**/Dockerfile'
-              tags: '$(dockerImageName)'
 
-  - stage: Test
+  - stage: BuildDocker
+    displayName: Build and Push Docker Image
     dependsOn: Build
     condition: succeeded()
     jobs:
-      - job: TestJob
+      - job: DockerBuild
         steps:
-          - script: echo "Testing docker image"
-            displayName: 'Run Tests'
+          - task: Docker@2
+            displayName: Build and Push to Docker Hub
+            inputs:
+              command: buildAndPush
+              repository: $(imageRepository)
+              dockerfile: $(dockerfilePath)
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest
+
+  - stage: Deploy
+    displayName: Deploy to Azure Container Instance
+    dependsOn: BuildDocker
+    condition: succeeded()
+    jobs:
+      - job: Deploy
+        displayName: Deploy Container
+        steps:
+          - task: AzureCLI@2
+            displayName: Update Container Instance
+            inputs:
+              azureSubscription: 'Azure subscription 1'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az container create \
+                  --resource-group DefaultResourceGroup-EUS \
+                  --name my-app \
+                  --image docker.io/bhandhuvistu/medical-ai-platform:$(tag) \
+                  --cpu 1 \
+                  --memory 1.5 \
+                  --port 8080 \
+                  --registry-login-server docker.io \
+                  --registry-username bhandhuvistu \
+                  --registry-password $(DOCKER_PASSWORD) \
+                  --restart-policy OnFailure
