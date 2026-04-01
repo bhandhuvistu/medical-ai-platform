@@ -5,11 +5,12 @@ pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  dockerRegistryServiceConnection: 'dockerhub'
+  dockerRegistryServiceConnection: 'DockerHub'
   imageRepository: 'bhandhuvistu/medical-ai-platform'
   containerRegistry: 'docker.io'
   dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
   tag: '$(Build.BuildId)'
+  DOCKER_PASSWORD: $(DOCKER_PASSWORD)
 
 stages:
   - stage: Build
@@ -55,7 +56,7 @@ stages:
           - task: AzureCLI@2
             displayName: Update Container Instance
             inputs:
-              azureSubscription: 'Azure subscription 1'
+              azureSubscription: 'azure-app-service-connection'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
