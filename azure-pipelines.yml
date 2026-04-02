@@ -74,9 +74,17 @@ jobs:
           scriptLocation: 'inlineScript'
           inlineScript: |
             echo "Running Smoke Tests"
-            sleep 10
+            sleep 30
+            echo "Checking container status..."
+            az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev
+            echo "Getting container IP..."
             DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
             echo "Dev Container IP: $DEV_IP"
-            curl -f http://$DEV_IP:8080/api/health || exit 1
+            if [ -z "$DEV_IP" ]; then
+              echo "ERROR: Failed to get container IP"
+              exit 1
+            fi
+            echo "Testing health endpoint..."
+            curl -v http://$DEV_IP:8080/api/health
             echo "✓ All smoke tests passed"
         condition: succeeded()
