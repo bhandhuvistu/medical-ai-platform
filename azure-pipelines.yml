@@ -58,6 +58,7 @@ jobs:
               --resource-group DefaultResourceGroup-EUS \
               --name medical-ai-dev \
               --image docker.io/$(imageRepository):$(tag) \
+              --os-type Linux \
               --cpu 1 \
               --memory 1.5 \
               --port 8080 \
