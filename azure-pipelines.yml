@@ -61,7 +61,7 @@ jobs:
               --port 8080 \
               --registry-login-server docker.io \
               --registry-username $(dockerHubUsername) \
-              --registry-password $(dockerHubPassword) \
+              --registry-password $(DOCKER_PASSWORD) \
               --restart-policy Always
             echo "Dev deployment completed successfully"
             echo "========================================="
