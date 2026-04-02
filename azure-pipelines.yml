@@ -51,7 +51,9 @@ jobs:
             echo "========================================="
             echo "Deploying to Dev Environment"
             echo "========================================="
+            echo "Step 1: Delete old container..."
             az container delete --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --yes || true
+            echo "Step 2: Creating new container..."
             az container create \
               --resource-group DefaultResourceGroup-EUS \
               --name medical-ai-dev \
@@ -63,6 +65,12 @@ jobs:
               --registry-username $(dockerHubUsername) \
               --registry-password $(DOCKER_PASSWORD) \
               --restart-policy Always
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to create container"
+              exit 1
+            fi
+            echo "Step 3: Verifying container..."
+            az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev
             echo "Dev deployment completed successfully"
             echo "========================================="
 
