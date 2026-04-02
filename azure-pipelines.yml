@@ -52,15 +52,31 @@ jobs:
             echo "Deploying to Dev Environment"
             echo "========================================="
             az container delete --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --yes || true
-            az container create --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --image docker.io/$(imageRepository):$(tag) --cpu 1 --memory 1.5 --port 8080 --registry-login-server docker.io --registry-username bhandhuvistu --registry-password $(DockerHubPassword) --restart-policy Always
+            az container create \
+              --resource-group DefaultResourceGroup-EUS \
+              --name medical-ai-dev \
+              --image docker.io/$(imageRepository):$(tag) \
+              --cpu 1 \
+              --memory 1.5 \
+              --port 8080 \
+              --registry-login-server docker.io \
+              --registry-username $(dockerHubUsername) \
+              --registry-password $(dockerHubPassword) \
+              --restart-policy Always
             echo "Dev deployment completed successfully"
             echo "========================================="
 
-      - script: |
-          echo "Running Smoke Tests"
-          sleep 10
-          DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
-          curl -f http://$DEV_IP:8080/api/health || exit 1
-          echo "✓ All smoke tests passed"
+      - task: AzureCLI@2
         displayName: Smoke Tests
+        inputs:
+          azureSubscription: 'azure-app-service-connection'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            echo "Running Smoke Tests"
+            sleep 10
+            DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
+            echo "Dev Container IP: $DEV_IP"
+            curl -f http://$DEV_IP:8080/api/health || exit 1
+            echo "✓ All smoke tests passed"
         condition: succeeded()
