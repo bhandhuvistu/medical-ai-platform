@@ -63,6 +63,7 @@ jobs:
               --memory 1.5 \
               --ports 8080 \
               --protocol TCP \
+              --ip-address public \
               --registry-login-server docker.io \
               --registry-username $(dockerHubUsername) \
               --registry-password $(DOCKER_PASSWORD) \
