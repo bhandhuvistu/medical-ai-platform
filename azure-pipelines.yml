@@ -15,20 +15,18 @@ jobs:
   - job: BuildAndDeploy
     displayName: Build, Test, Docker, Deploy
     steps:
-      - task: JavaToolInstaller@0
-        displayName: Install Java 17
-        inputs:
-          versionSpec: '17'
-          jdkArchitectureOption: 'x64'
-          jdkSourceOption: 'PreInstalled'
+      - bash: |
+          echo "Setting JAVA_HOME"
+          echo "##vso[task.setvariable variable=JAVA_HOME]/usr/lib/jvm/java-17-openjdk-amd64"
+        displayName: Set JAVA_HOME
 
       - task: Maven@4
         displayName: Build Maven Project
         inputs:
           mavenPomFile: 'pom.xml'
           mavenOptions: '-Xmx3072m'
-          javaHomeOption: 'JDKVersion'
-          jdkVersionOption: '17'
+          javaHomeOption: 'Path'
+          jdkUserInputPath: '/usr/lib/jvm/java-17-openjdk-amd64'
           publishJUnitResults: true
           testResultsFiles: '**/surefire-reports/TEST-*.xml'
 
@@ -55,20 +53,14 @@ jobs:
             echo "========================================="
             az container delete --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --yes || true
             az container create --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --image docker.io/$(imageRepository):$(tag) --cpu 1 --memory 1.5 --port 8080 --registry-login-server docker.io --registry-username bhandhuvistu --registry-password $(DockerHubPassword) --restart-policy Always
-            echo "========================================="
             echo "Dev deployment completed successfully"
             echo "========================================="
 
       - script: |
-          echo "========================================="
           echo "Running Smoke Tests"
-          echo "========================================="
           sleep 10
           DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
-          echo "Dev Container IP: $DEV_IP"
-          echo "Testing health endpoint..."
           curl -f http://$DEV_IP:8080/api/health || exit 1
           echo "✓ All smoke tests passed"
-          echo "========================================="
         displayName: Smoke Tests
         condition: succeeded()
