@@ -10,25 +10,19 @@ variables:
   containerRegistry: 'docker.io'
   dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
   tag: '$(Build.BuildId)'
+  javaHome: '/usr/lib/jvm/java-17-openjdk-amd64'
 
 jobs:
   - job: BuildAndDeploy
     displayName: Build, Test, Docker, Deploy
     steps:
-      - task: JavaToolInstaller@0
-        displayName: Install Java 17
-        inputs:
-          versionSpec: '17'
-          jdkArchitectureOption: 'x64'
-          jdkSourceOption: 'PreInstalled'
-
       - task: Maven@4
         displayName: Build Maven Project
         inputs:
           mavenPomFile: 'pom.xml'
           mavenOptions: '-Xmx3072m'
-          javaHomeOption: 'JDKVersion'
-          jdkVersionOption: '17'
+          javaHomeOption: 'Path'
+          jdkUserInputPath: '$(javaHome)'
           publishJUnitResults: true
           testResultsFiles: '**/surefire-reports/TEST-*.xml'
 
