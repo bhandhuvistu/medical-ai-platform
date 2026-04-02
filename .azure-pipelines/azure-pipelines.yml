@@ -1,0 +1,22 @@
+# Azure Pipelines YAML Configuration
+
+# Remove the JavaToolInstaller@0 task and add a bash task to set JAVA_HOME
+
+jobs:
+- job: Build
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+    - script: |
+        echo "Setting JAVA_HOME"
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      displayName: 'Set JAVA_HOME'
+
+    # Updated Maven task with Path option
+    - task: Maven@3
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'package'
+        options: ' ' 
+        javaHomeOption: 'Path'
+        jdkUserInputPath: '/usr/lib/jvm/java-17-openjdk-amd64'
