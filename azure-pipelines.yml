@@ -61,7 +61,8 @@ jobs:
               --os-type Linux \
               --cpu 1 \
               --memory 1.5 \
-              --port 8080 \
+              --ports 8080 \
+              --protocol TCP \
               --registry-login-server docker.io \
               --registry-username $(dockerHubUsername) \
               --registry-password $(DOCKER_PASSWORD) \
@@ -70,7 +71,17 @@ jobs:
               echo "ERROR: Failed to create container"
               exit 1
             fi
-            echo "Step 3: Verifying container..."
+            echo "Step 3: Waiting for container to get IP..."
+            for i in {1..60}; do
+              DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
+              if [ ! -z "$DEV_IP" ] && [ "$DEV_IP" != "None" ]; then
+                echo "Container IP assigned: $DEV_IP"
+                break
+              fi
+              echo "Waiting for IP... (attempt $i/60)"
+              sleep 2
+            done
+            echo "Step 4: Verifying container..."
             az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev
             echo "Dev deployment completed successfully"
             echo "========================================="
@@ -89,11 +100,15 @@ jobs:
             echo "Getting container IP..."
             DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
             echo "Dev Container IP: $DEV_IP"
-            if [ -z "$DEV_IP" ]; then
+            if [ -z "$DEV_IP" ] || [ "$DEV_IP" = "None" ]; then
               echo "ERROR: Failed to get container IP"
               exit 1
             fi
             echo "Testing health endpoint..."
-            curl -v http://$DEV_IP:8080/api/health
+            for i in {1..10}; do
+              echo "Health check attempt $i/10..."
+              curl -v http://$DEV_IP:8080/api/health && break
+              sleep 3
+            done
             echo "✓ All smoke tests passed"
         condition: succeeded()
