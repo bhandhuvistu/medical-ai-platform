@@ -5,7 +5,6 @@
 # ============================================================
 
 trigger:
-  - main
   branches:
     include:
       - main
@@ -621,7 +620,7 @@ stages:
                 echo "New slot IP: $NEW_IP"
                 if [ -z "$NEW_IP" ] || [ "$NEW_IP" = "None" ]; then
                   echo "ERROR: New production slot has no IP."
-                  az container logs --resource-group $(resourceGroup) --name "$CONTAINER_NAME) || true
+                  az container logs --resource-group $(resourceGroup) --name "$CONTAINER_NAME" || true
                   exit 1
                 fi
                 BASE_URL="http://$NEW_IP:$(containerPort)"
