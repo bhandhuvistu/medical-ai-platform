@@ -5,6 +5,7 @@
 # ============================================================
 
 trigger:
+  - main
   branches:
     include:
       - main
@@ -28,16 +29,16 @@ variables:
   imageRepository: 'bhandhuvistu/medical-ai-platform'
   containerRegistry: 'docker.io'
   dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
-
+  
   # Versioning: <semver>-<buildId>  e.g. 0.1.0-42
   appVersion: '0.1.0'
   tag: '$(appVersion)-$(Build.BuildId)'
-
+  
   # Azure
   azureSubscription: 'azure-app-service-connection'
   resourceGroup: 'DefaultResourceGroup-EUS'
   acrLoginServer: 'docker.io'
-
+  
   # Environments
   devContainerName: 'medical-ai-dev'
   stagingContainerName: 'medical-ai-staging'
@@ -182,13 +183,11 @@ stages:
                 echo "================================================"
                 echo "Deploying $(tag) to Dev Environment"
                 echo "================================================"
-
                 echo "Step 1: Removing old container (if exists)..."
                 az container delete \
                   --resource-group $(resourceGroup) \
                   --name $(devContainerName) \
                   --yes 2>/dev/null || echo "No existing container to remove."
-
                 echo "Step 2: Creating container..."
                 az container create \
                   --resource-group $(resourceGroup) \
@@ -208,7 +207,6 @@ stages:
                     SPRING_PROFILES_ACTIVE=dev \
                     APP_VERSION=$(tag) \
                     BUILD_ID=$(Build.BuildId)
-
                 echo "Step 3: Waiting for public IP assignment (up to 2 min)..."
                 for i in {1..60}; do
                   DEV_IP=$(az container show \
@@ -223,14 +221,12 @@ stages:
                   echo "  Waiting... attempt $i/60"
                   sleep 2
                 done
-
                 echo "Step 4: Container state:"
                 az container show \
                   --resource-group $(resourceGroup) \
                   --name $(devContainerName) \
                   --query '{name:name,state:instanceView.state,ip:ipAddress.ip,image:containers[0].image}' \
                   --output json
-
                 echo "================================================"
                 echo "Dev deployment completed: $(tag)"
                 echo "================================================"
@@ -245,25 +241,20 @@ stages:
                 echo "================================================"
                 echo "Running Dev Smoke Tests"
                 echo "================================================"
-
                 echo "Waiting 30s for application startup..."
                 sleep 30
-
                 DEV_IP=$(az container show \
                   --resource-group $(resourceGroup) \
                   --name $(devContainerName) \
                   --query ipAddress.ip --output tsv)
                 echo "Container IP: $DEV_IP"
-
                 if [ -z "$DEV_IP" ] || [ "$DEV_IP" = "None" ]; then
                   echo "ERROR: Container has no public IP."
                   az container logs --resource-group $(resourceGroup) --name $(devContainerName) || true
                   exit 1
                 fi
-
                 BASE_URL="http://$DEV_IP:$(containerPort)"
                 echo "Testing: $BASE_URL"
-
                 echo "--- Health check (15 retries, 10s apart) ---"
                 HEALTH_OK=false
                 for i in {1..15}; do
@@ -277,17 +268,14 @@ stages:
                   echo "  HTTP $HTTP_CODE – retrying in 10s..."
                   sleep 10
                 done
-
                 if [ "$HEALTH_OK" = "false" ]; then
                   echo "ERROR: Health check failed after 15 attempts."
                   echo "Container logs:"
                   az container logs --resource-group $(resourceGroup) --name $(devContainerName) || true
                   exit 1
                 fi
-
                 echo "--- Actuator endpoint check ---"
                 curl -s "$BASE_URL/actuator/info" || true
-
                 echo "================================================"
                 echo "✓ Dev smoke tests passed"
                 echo "================================================"
@@ -323,13 +311,11 @@ stages:
                 echo "================================================"
                 echo "Deploying $(tag) to Staging Environment"
                 echo "================================================"
-
                 echo "Step 1: Removing old staging container (if exists)..."
                 az container delete \
                   --resource-group $(resourceGroup) \
                   --name $(stagingContainerName) \
                   --yes 2>/dev/null || echo "No existing staging container to remove."
-
                 echo "Step 2: Creating staging container..."
                 az container create \
                   --resource-group $(resourceGroup) \
@@ -349,7 +335,6 @@ stages:
                     SPRING_PROFILES_ACTIVE=staging \
                     APP_VERSION=$(tag) \
                     BUILD_ID=$(Build.BuildId)
-
                 echo "Step 3: Waiting for staging IP..."
                 for i in {1..60}; do
                   STAGING_IP=$(az container show \
@@ -364,14 +349,12 @@ stages:
                   echo "  Waiting... attempt $i/60"
                   sleep 2
                 done
-
                 echo "Step 4: Container state:"
                 az container show \
                   --resource-group $(resourceGroup) \
                   --name $(stagingContainerName) \
                   --query '{name:name,state:instanceView.state,ip:ipAddress.ip,image:containers[0].image}' \
                   --output json
-
                 echo "================================================"
                 echo "Staging deployment completed: $(tag)"
                 echo "================================================"
@@ -386,25 +369,20 @@ stages:
                 echo "================================================"
                 echo "Running Staging Integration Tests"
                 echo "================================================"
-
                 echo "Waiting 45s for staging application startup..."
                 sleep 45
-
                 STAGING_IP=$(az container show \
                   --resource-group $(resourceGroup) \
                   --name $(stagingContainerName) \
                   --query ipAddress.ip --output tsv)
                 echo "Staging IP: $STAGING_IP"
-
                 if [ -z "$STAGING_IP" ] || [ "$STAGING_IP" = "None" ]; then
                   echo "ERROR: Staging container has no public IP."
                   az container logs --resource-group $(resourceGroup) --name $(stagingContainerName) || true
                   exit 1
                 fi
-
                 BASE_URL="http://$STAGING_IP:$(containerPort)"
                 TESTS_PASSED=true
-
                 echo "--- Integration test: /api/health ---"
                 for i in {1..15}; do
                   HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
@@ -419,21 +397,17 @@ stages:
                   echo "  HTTP $HTTP_CODE – retrying in 10s..."
                   sleep 10
                 done
-
                 echo "--- Integration test: /actuator/health ---"
                 ACTUATOR_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/actuator/health" || echo "000")
                 echo "  Actuator health HTTP: $ACTUATOR_CODE"
-
                 echo "--- Integration test: /actuator/info ---"
                 curl -s "$BASE_URL/actuator/info" || true
-
                 if [ "$TESTS_PASSED" = "false" ]; then
                   echo "================================================"
                   echo "✗ Staging integration tests FAILED – triggering rollback"
                   echo "================================================"
                   exit 1
                 fi
-
                 echo "================================================"
                 echo "✓ Staging integration tests passed"
                 echo "================================================"
@@ -449,13 +423,11 @@ stages:
                 echo "================================================"
                 echo "Running Performance Baseline Tests (Staging)"
                 echo "================================================"
-
                 STAGING_IP=$(az container show \
                   --resource-group $(resourceGroup) \
                   --name $(stagingContainerName) \
                   --query ipAddress.ip --output tsv)
                 BASE_URL="http://$STAGING_IP:$(containerPort)"
-
                 echo "Measuring response times for /api/health (10 requests)..."
                 TOTAL_MS=0
                 PASS=0
@@ -468,13 +440,10 @@ stages:
                   TOTAL_MS=$((TOTAL_MS + ELAPSED_MS))
                   if [ "$HTTP_CODE" = "200" ]; then PASS=$((PASS + 1)); fi
                 done
-
                 AVG_MS=$((TOTAL_MS / 10))
                 echo "Performance summary:"
                 echo "  Successful requests: $PASS/10"
                 echo "  Average response time: ${AVG_MS}ms"
-
-                # Baseline threshold: warn if average > 2000ms, fail if > 5000ms
                 if [ $AVG_MS -gt 5000 ]; then
                   echo "✗ ERROR: Average response time ${AVG_MS}ms exceeds 5000ms – failing build"
                   exit 1
@@ -483,7 +452,6 @@ stages:
                 else
                   echo "✓ Performance within baseline (avg ${AVG_MS}ms)"
                 fi
-
                 echo "================================================"
                 echo "✓ Performance baseline completed"
                 echo "================================================"
@@ -496,7 +464,6 @@ stages:
             name: recordStagingVersion
             condition: succeeded()
 
-      # Manual approval gate before production promotion
       - job: WaitForProductionApproval
         displayName: '⏸ Await Manual Approval for Production'
         dependsOn: DeployToStaging
@@ -510,13 +477,10 @@ stages:
               notifyUsers: ''
               instructions: |
                 Staging deployment of version $(tag) completed successfully.
-
                 Staging integration tests: PASSED
                 Performance baseline: PASSED
-
                 Please review the staging environment and approve to promote to production.
                 Container: $(stagingContainerName) in resource group $(resourceGroup)
-
                 APPROVE to continue to production deployment.
                 REJECT to abort the pipeline.
               onTimeout: 'reject'
@@ -544,7 +508,6 @@ stages:
                 echo "================================================"
                 echo "Determining active production slot"
                 echo "================================================"
-
                 BLUE_STATE=$(az container show \
                   --resource-group $(resourceGroup) \
                   --name $(prodContainerNameBlue) \
@@ -553,11 +516,8 @@ stages:
                   --resource-group $(resourceGroup) \
                   --name $(prodContainerNameGreen) \
                   --query instanceView.state --output tsv 2>/dev/null || echo "NotFound")
-
                 echo "Blue slot state : $BLUE_STATE"
                 echo "Green slot state: $GREEN_STATE"
-
-                # Active = currently Running; deploy to the inactive slot
                 if [ "$BLUE_STATE" = "Running" ]; then
                   DEPLOY_SLOT="green"
                   ACTIVE_SLOT="blue"
@@ -565,7 +525,6 @@ stages:
                   DEPLOY_SLOT="blue"
                   ACTIVE_SLOT="green"
                 fi
-
                 echo "Active slot  : $ACTIVE_SLOT"
                 echo "Deploy slot  : $DEPLOY_SLOT"
                 echo "##vso[task.setvariable variable=DEPLOY_SLOT;isOutput=true]$DEPLOY_SLOT"
@@ -582,25 +541,21 @@ stages:
               scriptLocation: 'inlineScript'
               inlineScript: |
                 set -e
-                DEPLOY_SLOT="$(DEPLOY_SLOT)"
+                DEPLOY_SLOT="$(slotDetect.DEPLOY_SLOT)"
                 echo "================================================"
                 echo "Blue-Green: deploying $(tag) to $DEPLOY_SLOT slot"
                 echo "================================================"
-
                 if [ "$DEPLOY_SLOT" = "blue" ]; then
                   CONTAINER_NAME="$(prodContainerNameBlue)"
                 else
                   CONTAINER_NAME="$(prodContainerNameGreen)"
                 fi
-
                 echo "Target container: $CONTAINER_NAME"
-
                 echo "Removing old $DEPLOY_SLOT container (if exists)..."
                 az container delete \
                   --resource-group $(resourceGroup) \
                   --name "$CONTAINER_NAME" \
                   --yes 2>/dev/null || echo "No existing container."
-
                 echo "Deploying new $DEPLOY_SLOT container..."
                 az container create \
                   --resource-group $(resourceGroup) \
@@ -621,7 +576,6 @@ stages:
                     APP_VERSION=$(tag) \
                     BUILD_ID=$(Build.BuildId) \
                     DEPLOYMENT_SLOT=$DEPLOY_SLOT
-
                 echo "Waiting for $DEPLOY_SLOT slot IP..."
                 for i in {1..60}; do
                   NEW_IP=$(az container show \
@@ -636,7 +590,6 @@ stages:
                   echo "  Waiting... attempt $i/60"
                   sleep 2
                 done
-
                 echo "$DEPLOY_SLOT slot state:"
                 az container show \
                   --resource-group $(resourceGroup) \
@@ -652,33 +605,27 @@ stages:
               scriptLocation: 'inlineScript'
               inlineScript: |
                 echo "================================================"
-                echo "Production Smoke Tests on new $(DEPLOY_SLOT) slot"
+                echo "Production Smoke Tests on new $(slotDetect.DEPLOY_SLOT) slot"
                 echo "================================================"
-
                 echo "Waiting 45s for production startup..."
                 sleep 45
-
-                if [ "$(DEPLOY_SLOT)" = "blue" ]; then
+                if [ "$(slotDetect.DEPLOY_SLOT)" = "blue" ]; then
                   CONTAINER_NAME="$(prodContainerNameBlue)"
                 else
                   CONTAINER_NAME="$(prodContainerNameGreen)"
                 fi
-
                 NEW_IP=$(az container show \
                   --resource-group $(resourceGroup) \
                   --name "$CONTAINER_NAME" \
                   --query ipAddress.ip --output tsv)
                 echo "New slot IP: $NEW_IP"
-
                 if [ -z "$NEW_IP" ] || [ "$NEW_IP" = "None" ]; then
                   echo "ERROR: New production slot has no IP."
-                  az container logs --resource-group $(resourceGroup) --name "$CONTAINER_NAME" || true
+                  az container logs --resource-group $(resourceGroup) --name "$CONTAINER_NAME) || true
                   exit 1
                 fi
-
                 BASE_URL="http://$NEW_IP:$(containerPort)"
                 echo "Smoke testing: $BASE_URL"
-
                 SMOKE_OK=false
                 for i in {1..20}; do
                   HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
@@ -690,7 +637,6 @@ stages:
                   echo "  Attempt $i/20 – HTTP $HTTP_CODE – retrying in 10s..."
                   sleep 10
                 done
-
                 if [ "$SMOKE_OK" = "false" ]; then
                   echo "ERROR: Production smoke tests failed – new slot is unhealthy."
                   echo "Container logs:"
@@ -698,11 +644,10 @@ stages:
                   echo "##vso[task.setvariable variable=SMOKE_FAILED]true"
                   exit 1
                 fi
-
                 echo "##vso[task.setvariable variable=SMOKE_FAILED]false"
                 echo "##vso[task.setvariable variable=PROD_NEW_SLOT_IP]$NEW_IP"
                 echo "================================================"
-                echo "✓ Production smoke tests passed on $(DEPLOY_SLOT) slot"
+                echo "✓ Production smoke tests passed on $(slotDetect.DEPLOY_SLOT) slot"
                 echo "================================================"
             condition: succeeded()
 
@@ -715,24 +660,21 @@ stages:
               inlineScript: |
                 echo "================================================"
                 echo "Completing Blue-Green swap"
-                echo "Active: $(ACTIVE_SLOT) → New active: $(DEPLOY_SLOT)"
+                echo "Active: $(slotDetect.ACTIVE_SLOT) → New active: $(slotDetect.DEPLOY_SLOT)"
                 echo "================================================"
-
-                echo "Stopping old $(ACTIVE_SLOT) slot..."
-                if [ "$(ACTIVE_SLOT)" = "blue" ]; then
+                echo "Stopping old $(slotDetect.ACTIVE_SLOT) slot..."
+                if [ "$(slotDetect.ACTIVE_SLOT)" = "blue" ]; then
                   OLD_CONTAINER="$(prodContainerNameBlue)"
                 else
                   OLD_CONTAINER="$(prodContainerNameGreen)"
                 fi
-
                 az container stop \
                   --resource-group $(resourceGroup) \
                   --name "$OLD_CONTAINER" 2>/dev/null || echo "Old slot already stopped or not found."
-
                 NEW_IP="$(PROD_NEW_SLOT_IP)"
                 echo "================================================"
                 echo "✓ Blue-Green swap complete"
-                echo "  New active slot : $(DEPLOY_SLOT)"
+                echo "  New active slot : $(slotDetect.DEPLOY_SLOT)"
                 echo "  Production IP   : $NEW_IP"
                 echo "  Version         : $(tag)"
                 echo "================================================"
@@ -740,7 +682,7 @@ stages:
 
           - bash: |
               echo "##vso[task.setvariable variable=LAST_GOOD_PROD_TAG;isOutput=true]$(tag)"
-              echo "##vso[task.setvariable variable=LAST_ACTIVE_SLOT;isOutput=true]$(DEPLOY_SLOT)"
+              echo "##vso[task.setvariable variable=LAST_ACTIVE_SLOT;isOutput=true]$(slotDetect.DEPLOY_SLOT)"
             displayName: Record Successful Production Version
             name: recordProdVersion
             condition: succeeded()
@@ -775,27 +717,20 @@ stages:
                 echo "ROLLBACK TRIGGERED – pipeline failure detected"
                 echo "Current version: $(tag)"
                 echo "================================================"
-
-                # Identify which containers are unhealthy and remove them
                 for CONTAINER in $(devContainerName) $(stagingContainerName) $(prodContainerNameBlue) $(prodContainerNameGreen); do
                   STATE=$(az container show \
                     --resource-group $(resourceGroup) \
                     --name "$CONTAINER" \
                     --query instanceView.state --output tsv 2>/dev/null || echo "NotFound")
-
                   if [ "$STATE" = "NotFound" ]; then
                     echo "  $CONTAINER: not found – skipping"
                     continue
                   fi
-
                   IMAGE=$(az container show \
                     --resource-group $(resourceGroup) \
                     --name "$CONTAINER" \
                     --query 'containers[0].image' --output tsv 2>/dev/null || echo "unknown")
-
                   echo "  $CONTAINER: state=$STATE image=$IMAGE"
-
-                  # If running the failed version, remove it
                   FULL_IMAGE="$(acrLoginServer)/$(imageRepository):$(tag)"
                   if [ "$IMAGE" = "$FULL_IMAGE" ]; then
                     echo "  → Removing failed container $CONTAINER (version $(tag))..."
@@ -806,7 +741,6 @@ stages:
                     echo "  ✓ Removed $CONTAINER"
                   fi
                 done
-
                 echo "================================================"
                 echo "Rollback actions completed."
                 echo "To redeploy a previous version, re-run the pipeline"
@@ -826,14 +760,10 @@ stages:
               notifyUsers: ''
               instructions: |
                 Automatic rollback has been executed for version $(tag).
-
                 Failed containers running version $(tag) have been removed.
-
                 To perform a manual rollback to a specific version:
                 1. Go to Azure Pipelines → Run Pipeline
                 2. Set variable: tag = <previous-version>  e.g. 0.1.0-<previous-build-id>
                 3. Run only the Deploy stages
-
                 APPROVE to acknowledge and close this gate.
-              onTimeout: 'reject'
               onTimeout: 'resume'
