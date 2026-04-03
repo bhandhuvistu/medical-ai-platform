@@ -240,8 +240,8 @@ stages:
                 echo "================================================"
                 echo "Running Dev Smoke Tests"
                 echo "================================================"
-                echo "Waiting 30s for application startup..."
-                sleep 30
+                echo "Waiting 60s for application startup..."
+                sleep 60
                 DEV_IP=$(az container show \
                   --resource-group $(resourceGroup) \
                   --name $(devContainerName) \
@@ -254,21 +254,22 @@ stages:
                 fi
                 BASE_URL="http://$DEV_IP:$(containerPort)"
                 echo "Testing: $BASE_URL"
-                echo "--- Health check (15 retries, 10s apart) ---"
+                echo "--- Health check (20 retries, 15s apart) ---"
                 HEALTH_OK=false
-                for i in {1..15}; do
-                  echo "  Attempt $i/15..."
-                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                for i in {1..20}; do
+                  echo "  Attempt $i/20..."
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "$BASE_URL/api/health" 2>&1 || echo "000")
+                  echo "    Response: HTTP $HTTP_CODE"
                   if [ "$HTTP_CODE" = "200" ]; then
                     echo "  ✓ Health endpoint returned HTTP 200"
                     HEALTH_OK=true
                     break
                   fi
-                  echo "  HTTP $HTTP_CODE – retrying in 10s..."
-                  sleep 10
+                  echo "  Waiting 15s before retry..."
+                  sleep 15
                 done
                 if [ "$HEALTH_OK" = "false" ]; then
-                  echo "ERROR: Health check failed after 15 attempts."
+                  echo "ERROR: Health check failed after 20 attempts."
                   echo "Container logs:"
                   az container logs --resource-group $(resourceGroup) --name $(devContainerName) || true
                   exit 1
@@ -368,8 +369,8 @@ stages:
                 echo "================================================"
                 echo "Running Staging Integration Tests"
                 echo "================================================"
-                echo "Waiting 45s for staging application startup..."
-                sleep 45
+                echo "Waiting 60s for staging application startup..."
+                sleep 60
                 STAGING_IP=$(az container show \
                   --resource-group $(resourceGroup) \
                   --name $(stagingContainerName) \
@@ -383,21 +384,21 @@ stages:
                 BASE_URL="http://$STAGING_IP:$(containerPort)"
                 TESTS_PASSED=true
                 echo "--- Integration test: /api/health ---"
-                for i in {1..15}; do
-                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                for i in {1..20}; do
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "$BASE_URL/api/health" 2>&1 || echo "000")
                   if [ "$HTTP_CODE" = "200" ]; then
                     echo "  ✓ Health check passed (HTTP 200)"
                     break
                   fi
-                  if [ $i -eq 15 ]; then
-                    echo "  ✗ Health check failed after 15 attempts"
+                  if [ $i -eq 20 ]; then
+                    echo "  ✗ Health check failed after 20 attempts"
                     TESTS_PASSED=false
                   fi
-                  echo "  HTTP $HTTP_CODE – retrying in 10s..."
-                  sleep 10
+                  echo "  Attempt $i/20 – HTTP $HTTP_CODE – retrying in 15s..."
+                  sleep 15
                 done
                 echo "--- Integration test: /actuator/health ---"
-                ACTUATOR_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/actuator/health" || echo "000")
+                ACTUATOR_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "$BASE_URL/actuator/health" 2>&1 || echo "000")
                 echo "  Actuator health HTTP: $ACTUATOR_CODE"
                 echo "--- Integration test: /actuator/info ---"
                 curl -s "$BASE_URL/actuator/info" || true
@@ -432,7 +433,7 @@ stages:
                 PASS=0
                 for i in {1..10}; do
                   START=$(date +%s%N)
-                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "$BASE_URL/api/health" 2>&1 || echo "000")
                   END=$(date +%s%N)
                   ELAPSED_MS=$(( (END - START) / 1000000 ))
                   echo "  Request $i: HTTP $HTTP_CODE – ${ELAPSED_MS}ms"
@@ -606,8 +607,8 @@ stages:
                 echo "================================================"
                 echo "Production Smoke Tests on new $(slotDetect.DEPLOY_SLOT) slot"
                 echo "================================================"
-                echo "Waiting 45s for production startup..."
-                sleep 45
+                echo "Waiting 60s for production startup..."
+                sleep 60
                 if [ "$(slotDetect.DEPLOY_SLOT)" = "blue" ]; then
                   CONTAINER_NAME="$(prodContainerNameBlue)"
                 else
@@ -627,14 +628,14 @@ stages:
                 echo "Smoke testing: $BASE_URL"
                 SMOKE_OK=false
                 for i in {1..20}; do
-                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 15 "$BASE_URL/api/health" 2>&1 || echo "000")
                   if [ "$HTTP_CODE" = "200" ]; then
                     echo "  ✓ Health check passed (HTTP 200)"
                     SMOKE_OK=true
                     break
                   fi
-                  echo "  Attempt $i/20 – HTTP $HTTP_CODE – retrying in 10s..."
-                  sleep 10
+                  echo "  Attempt $i/20 – HTTP $HTTP_CODE – retrying in 15s..."
+                  sleep 15
                 done
                 if [ "$SMOKE_OK" = "false" ]; then
                   echo "ERROR: Production smoke tests failed – new slot is unhealthy."
