@@ -206,7 +206,7 @@ stages:
                   --registry-password $(DOCKER_PASSWORD) \
                   --restart-policy Always \
                   --environment-variables \
-                    SPRING_PROFILES_ACTIVE=dev \
+                    SPRING_PROFILES_ACTIVE=api,dev \
                     APP_VERSION=$(tag) \
                     BUILD_ID=$(Build.BuildId)
                 echo "Step 3: Waiting for public IP assignment (up to 2 min)..."
@@ -335,7 +335,7 @@ stages:
                   --registry-password $(DOCKER_PASSWORD) \
                   --restart-policy Always \
                   --environment-variables \
-                    SPRING_PROFILES_ACTIVE=staging \
+                    SPRING_PROFILES_ACTIVE=api,staging \
                     APP_VERSION=$(tag) \
                     BUILD_ID=$(Build.BuildId)
                 echo "Step 3: Waiting for staging IP..."
@@ -575,7 +575,7 @@ stages:
                   --registry-password $(DOCKER_PASSWORD) \
                   --restart-policy Always \
                   --environment-variables \
-                    SPRING_PROFILES_ACTIVE=production \
+                    SPRING_PROFILES_ACTIVE=api,production \
                     APP_VERSION=$(tag) \
                     BUILD_ID=$(Build.BuildId) \
                     DEPLOYMENT_SLOT=$DEPLOY_SLOT
