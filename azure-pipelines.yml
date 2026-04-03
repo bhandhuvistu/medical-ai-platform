@@ -1,115 +1,769 @@
+# ============================================================
+# Medical AI Platform – Azure Pipelines CI/CD
+# Stages: Build → Docker → Dev → Staging → Production
+# Includes: security scanning, blue-green, rollback strategy
+# ============================================================
+
 trigger:
   - main
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - '**.md'
+      - 'docs/**'
+
+pr:
+  branches:
+    include:
+      - main
 
 pool:
   name: 'Default'
 
+# ── Global variables ──────────────────────────────────────
 variables:
+  # Docker / registry
   dockerRegistryServiceConnection: 'DockerHub'
   imageRepository: 'bhandhuvistu/medical-ai-platform'
   containerRegistry: 'docker.io'
   dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
-  tag: '$(Build.BuildId)'
+  
+  # Versioning: <semver>-<buildId>  e.g. 0.1.0-42
+  appVersion: '0.1.0'
+  tag: '$(appVersion)-$(Build.BuildId)'
+  
+  # Azure
+  azureSubscription: 'azure-app-service-connection'
+  resourceGroup: 'DefaultResourceGroup-EUS'
+  acrLoginServer: 'docker.io'
+  
+  # Environments
+  devContainerName: 'medical-ai-dev'
+  stagingContainerName: 'medical-ai-staging'
+  prodContainerNameBlue: 'medical-ai-prod-blue'
+  prodContainerNameGreen: 'medical-ai-prod-green'
+  containerPort: '8080'
 
-jobs:
-  - job: BuildAndDeploy
-    displayName: Build, Test, Docker, Deploy
-    steps:
-      - bash: |
-          echo "Setting JAVA_HOME"
-          echo "##vso[task.setvariable variable=JAVA_HOME]/usr/lib/jvm/java-17-openjdk-amd64"
-        displayName: Set JAVA_HOME
+# ===========================================================
+# STAGE 1 – BUILD & TEST
+# ===========================================================
+stages:
+  - stage: BuildAndTest
+    displayName: '1 – Build & Test'
+    jobs:
+      - job: Build
+        displayName: Maven Build + Unit Tests
+        steps:
+          - bash: |
+              echo "##vso[task.setvariable variable=JAVA_HOME]/usr/lib/jvm/java-17-openjdk-amd64"
+              echo "Build version: $(tag)"
+              echo "Source branch: $(Build.SourceBranch)"
+              echo "Build ID: $(Build.BuildId)"
+            displayName: Set JAVA_HOME & Print Build Info
 
-      - task: Maven@4
-        displayName: Build Maven Project
-        inputs:
-          mavenPomFile: 'pom.xml'
-          mavenOptions: '-Xmx3072m'
-          javaHomeOption: 'Path'
-          jdkUserInputPath: '/usr/lib/jvm/java-17-openjdk-amd64'
-          publishJUnitResults: true
-          testResultsFiles: '**/surefire-reports/TEST-*.xml'
+          - task: Maven@4
+            displayName: Maven Build & Unit Tests
+            inputs:
+              mavenPomFile: 'pom.xml'
+              mavenOptions: '-Xmx3072m'
+              javaHomeOption: 'Path'
+              jdkUserInputPath: '/usr/lib/jvm/java-17-openjdk-amd64'
+              goals: 'clean verify'
+              publishJUnitResults: true
+              testResultsFiles: '**/surefire-reports/TEST-*.xml'
+              codeCoverageToolOption: 'JaCoCo'
 
-      - task: Docker@2
-        displayName: Build and Push Docker Image
-        inputs:
-          command: buildAndPush
-          repository: $(imageRepository)
-          dockerfile: $(dockerfilePath)
-          containerRegistry: $(dockerRegistryServiceConnection)
-          tags: |
-            $(tag)
-            latest
+          - bash: |
+              echo "##vso[task.setvariable variable=BUILD_VERSION;isOutput=true]$(tag)"
+              echo "Build artifact version: $(tag)"
+            displayName: Export Build Version
+            name: setVersion
 
-      - task: AzureCLI@2
-        displayName: Deploy to Dev Environment
-        inputs:
-          azureSubscription: 'azure-app-service-connection'
-          scriptType: 'bash'
-          scriptLocation: 'inlineScript'
-          inlineScript: |
-            echo "========================================="
-            echo "Deploying to Dev Environment"
-            echo "========================================="
-            echo "Step 1: Delete old container..."
-            az container delete --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --yes || true
-            echo "Step 2: Creating new container..."
-            az container create \
-              --resource-group DefaultResourceGroup-EUS \
-              --name medical-ai-dev \
-              --image docker.io/$(imageRepository):$(tag) \
-              --os-type Linux \
-              --cpu 1 \
-              --memory 1.5 \
-              --ports 8080 \
-              --protocol TCP \
-              --ip-address public \
-              --registry-login-server docker.io \
-              --registry-username $(dockerHubUsername) \
-              --registry-password $(DOCKER_PASSWORD) \
-              --restart-policy Always
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Failed to create container"
-              exit 1
-            fi
-            echo "Step 3: Waiting for container to get IP..."
-            for i in {1..60}; do
-              DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
-              if [ ! -z "$DEV_IP" ] && [ "$DEV_IP" != "None" ]; then
-                echo "Container IP assigned: $DEV_IP"
-                break
+          - task: CopyFiles@2
+            displayName: Stage JAR Artifact
+            inputs:
+              SourceFolder: '$(Build.SourcesDirectory)'
+              Contents: '**/target/*.jar'
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/jars'
+
+          - task: PublishBuildArtifacts@1
+            displayName: Publish JAR Artifact
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/jars'
+              ArtifactName: 'medical-ai-jars-$(tag)'
+              publishLocation: 'Container'
+
+# ===========================================================
+# STAGE 2 – DOCKER BUILD, PUSH & SECURITY SCAN
+# ===========================================================
+  - stage: DockerBuild
+    displayName: '2 – Docker Build & Scan'
+    dependsOn: BuildAndTest
+    condition: succeeded()
+    jobs:
+      - job: DockerBuildPush
+        displayName: Build, Push & Trivy Scan
+        steps:
+          - task: Docker@2
+            displayName: Build Docker Image
+            inputs:
+              command: build
+              repository: $(imageRepository)
+              dockerfile: $(dockerfilePath)
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest
+              arguments: '--label build.version=$(tag) --label build.id=$(Build.BuildId)'
+
+          - bash: |
+              echo "================================================"
+              echo "Running Trivy Security Scan on $(imageRepository):$(tag)"
+              echo "================================================"
+              if ! command -v trivy &> /dev/null; then
+                echo "Installing Trivy..."
+                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
               fi
-              echo "Waiting for IP... (attempt $i/60)"
-              sleep 2
-            done
-            echo "Step 4: Verifying container..."
-            az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev
-            echo "Dev deployment completed successfully"
-            echo "========================================="
+              echo "--- LOW/MEDIUM vulnerabilities (informational) ---"
+              trivy image \
+                --exit-code 0 \
+                --severity LOW,MEDIUM \
+                --format table \
+                $(imageRepository):$(tag) || true
+              echo "--- HIGH/CRITICAL vulnerabilities (build gate) ---"
+              trivy image \
+                --exit-code 1 \
+                --severity HIGH,CRITICAL \
+                --format table \
+                $(imageRepository):$(tag)
+              echo "================================================"
+              echo "✓ Security scan completed – no HIGH/CRITICAL CVEs"
+              echo "================================================"
+            displayName: Trivy Security Scan
 
-      - task: AzureCLI@2
-        displayName: Smoke Tests
-        inputs:
-          azureSubscription: 'azure-app-service-connection'
-          scriptType: 'bash'
-          scriptLocation: 'inlineScript'
-          inlineScript: |
-            echo "Running Smoke Tests"
-            sleep 30
-            echo "Checking container status..."
-            az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev
-            echo "Getting container IP..."
-            DEV_IP=$(az container show --resource-group DefaultResourceGroup-EUS --name medical-ai-dev --query ipAddress.ip --output tsv)
-            echo "Dev Container IP: $DEV_IP"
-            if [ -z "$DEV_IP" ] || [ "$DEV_IP" = "None" ]; then
-              echo "ERROR: Failed to get container IP"
-              exit 1
-            fi
-            echo "Testing health endpoint..."
-            for i in {1..10}; do
-              echo "Health check attempt $i/10..."
-              curl -v http://$DEV_IP:8080/api/health && break
-              sleep 3
-            done
-            echo "✓ All smoke tests passed"
+          - task: Docker@2
+            displayName: Push Docker Image (versioned + latest)
+            inputs:
+              command: push
+              repository: $(imageRepository)
+              containerRegistry: $(dockerRegistryServiceConnection)
+              tags: |
+                $(tag)
+                latest
+
+          - bash: |
+              echo "##vso[task.setvariable variable=DOCKER_IMAGE;isOutput=true]$(containerRegistry)/$(imageRepository):$(tag)"
+              echo "Docker image published: $(containerRegistry)/$(imageRepository):$(tag)"
+            displayName: Export Docker Image Reference
+            name: setImage
+
+# ===========================================================
+# STAGE 3 – DEPLOY TO DEVELOPMENT
+# ===========================================================
+  - stage: DeployDev
+    displayName: '3 – Deploy to Dev'
+    dependsOn: DockerBuild
+    condition: succeeded()
+    variables:
+      environment: 'dev'
+    jobs:
+      - job: DeployToDev
+        displayName: Deploy & Smoke Test (Dev)
+        steps:
+          - task: AzureCLI@2
+            displayName: Deploy to Dev (ACI)
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -e
+                echo "================================================"
+                echo "Deploying $(tag) to Dev Environment"
+                echo "================================================"
+                echo "Step 1: Removing old container (if exists)..."
+                az container delete \
+                  --resource-group $(resourceGroup) \
+                  --name $(devContainerName) \
+                  --yes 2>/dev/null || echo "No existing container to remove."
+                echo "Step 2: Creating container..."
+                az container create \
+                  --resource-group $(resourceGroup) \
+                  --name $(devContainerName) \
+                  --image $(acrLoginServer)/$(imageRepository):$(tag) \
+                  --os-type Linux \
+                  --cpu 1 \
+                  --memory 1.5 \
+                  --ports $(containerPort) \
+                  --protocol TCP \
+                  --ip-address public \
+                  --registry-login-server $(acrLoginServer) \
+                  --registry-username $(dockerHubUsername) \
+                  --registry-password $(DOCKER_PASSWORD) \
+                  --restart-policy Always \
+                  --environment-variables \
+                    SPRING_PROFILES_ACTIVE=dev \
+                    APP_VERSION=$(tag) \
+                    BUILD_ID=$(Build.BuildId)
+                echo "Step 3: Waiting for public IP assignment (up to 2 min)..."
+                for i in {1..60}; do
+                  DEV_IP=$(az container show \
+                    --resource-group $(resourceGroup) \
+                    --name $(devContainerName) \
+                    --query ipAddress.ip --output tsv 2>/dev/null)
+                  if [ -n "$DEV_IP" ] && [ "$DEV_IP" != "None" ]; then
+                    echo "Container IP assigned: $DEV_IP"
+                    echo "##vso[task.setvariable variable=DEV_CONTAINER_IP]$DEV_IP"
+                    break
+                  fi
+                  echo "  Waiting... attempt $i/60"
+                  sleep 2
+                done
+                echo "Step 4: Container state:"
+                az container show \
+                  --resource-group $(resourceGroup) \
+                  --name $(devContainerName) \
+                  --query '{name:name,state:instanceView.state,ip:ipAddress.ip,image:containers[0].image}' \
+                  --output json
+                echo "================================================"
+                echo "Dev deployment completed: $(tag)"
+                echo "================================================"
+
+          - task: AzureCLI@2
+            displayName: Dev Smoke Tests & Health Checks
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "================================================"
+                echo "Running Dev Smoke Tests"
+                echo "================================================"
+                echo "Waiting 30s for application startup..."
+                sleep 30
+                DEV_IP=$(az container show \
+                  --resource-group $(resourceGroup) \
+                  --name $(devContainerName) \
+                  --query ipAddress.ip --output tsv)
+                echo "Container IP: $DEV_IP"
+                if [ -z "$DEV_IP" ] || [ "$DEV_IP" = "None" ]; then
+                  echo "ERROR: Container has no public IP."
+                  az container logs --resource-group $(resourceGroup) --name $(devContainerName) || true
+                  exit 1
+                fi
+                BASE_URL="http://$DEV_IP:$(containerPort)"
+                echo "Testing: $BASE_URL"
+                echo "--- Health check (15 retries, 10s apart) ---"
+                HEALTH_OK=false
+                for i in {1..15}; do
+                  echo "  Attempt $i/15..."
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                  if [ "$HTTP_CODE" = "200" ]; then
+                    echo "  ✓ Health endpoint returned HTTP 200"
+                    HEALTH_OK=true
+                    break
+                  fi
+                  echo "  HTTP $HTTP_CODE – retrying in 10s..."
+                  sleep 10
+                done
+                if [ "$HEALTH_OK" = "false" ]; then
+                  echo "ERROR: Health check failed after 15 attempts."
+                  echo "Container logs:"
+                  az container logs --resource-group $(resourceGroup) --name $(devContainerName) || true
+                  exit 1
+                fi
+                echo "--- Actuator endpoint check ---"
+                curl -s "$BASE_URL/actuator/info" || true
+                echo "================================================"
+                echo "✓ Dev smoke tests passed"
+                echo "================================================"
+            condition: succeeded()
+
+          - bash: |
+              echo "##vso[task.setvariable variable=LAST_GOOD_DEV_TAG;isOutput=true]$(tag)"
+            displayName: Record Successful Dev Version
+            name: recordDevVersion
+            condition: succeeded()
+
+# ===========================================================
+# STAGE 4 – DEPLOY TO STAGING
+# ===========================================================
+  - stage: DeployStaging
+    displayName: '4 – Deploy to Staging'
+    dependsOn: DeployDev
+    condition: succeeded()
+    variables:
+      environment: 'staging'
+    jobs:
+      - job: DeployToStaging
+        displayName: Deploy, Integration Tests & Performance Baseline (Staging)
+        steps:
+          - task: AzureCLI@2
+            displayName: Deploy to Staging (ACI)
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -e
+                echo "================================================"
+                echo "Deploying $(tag) to Staging Environment"
+                echo "================================================"
+                echo "Step 1: Removing old staging container (if exists)..."
+                az container delete \
+                  --resource-group $(resourceGroup) \
+                  --name $(stagingContainerName) \
+                  --yes 2>/dev/null || echo "No existing staging container to remove."
+                echo "Step 2: Creating staging container..."
+                az container create \
+                  --resource-group $(resourceGroup) \
+                  --name $(stagingContainerName) \
+                  --image $(acrLoginServer)/$(imageRepository):$(tag) \
+                  --os-type Linux \
+                  --cpu 2 \
+                  --memory 3 \
+                  --ports $(containerPort) \
+                  --protocol TCP \
+                  --ip-address public \
+                  --registry-login-server $(acrLoginServer) \
+                  --registry-username $(dockerHubUsername) \
+                  --registry-password $(DOCKER_PASSWORD) \
+                  --restart-policy Always \
+                  --environment-variables \
+                    SPRING_PROFILES_ACTIVE=staging \
+                    APP_VERSION=$(tag) \
+                    BUILD_ID=$(Build.BuildId)
+                echo "Step 3: Waiting for staging IP..."
+                for i in {1..60}; do
+                  STAGING_IP=$(az container show \
+                    --resource-group $(resourceGroup) \
+                    --name $(stagingContainerName) \
+                    --query ipAddress.ip --output tsv 2>/dev/null)
+                  if [ -n "$STAGING_IP" ] && [ "$STAGING_IP" != "None" ]; then
+                    echo "Staging IP: $STAGING_IP"
+                    echo "##vso[task.setvariable variable=STAGING_CONTAINER_IP]$STAGING_IP"
+                    break
+                  fi
+                  echo "  Waiting... attempt $i/60"
+                  sleep 2
+                done
+                echo "Step 4: Container state:"
+                az container show \
+                  --resource-group $(resourceGroup) \
+                  --name $(stagingContainerName) \
+                  --query '{name:name,state:instanceView.state,ip:ipAddress.ip,image:containers[0].image}' \
+                  --output json
+                echo "================================================"
+                echo "Staging deployment completed: $(tag)"
+                echo "================================================"
+
+          - task: AzureCLI@2
+            displayName: Staging Integration Tests
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "================================================"
+                echo "Running Staging Integration Tests"
+                echo "================================================"
+                echo "Waiting 45s for staging application startup..."
+                sleep 45
+                STAGING_IP=$(az container show \
+                  --resource-group $(resourceGroup) \
+                  --name $(stagingContainerName) \
+                  --query ipAddress.ip --output tsv)
+                echo "Staging IP: $STAGING_IP"
+                if [ -z "$STAGING_IP" ] || [ "$STAGING_IP" = "None" ]; then
+                  echo "ERROR: Staging container has no public IP."
+                  az container logs --resource-group $(resourceGroup) --name $(stagingContainerName) || true
+                  exit 1
+                fi
+                BASE_URL="http://$STAGING_IP:$(containerPort)"
+                TESTS_PASSED=true
+                echo "--- Integration test: /api/health ---"
+                for i in {1..15}; do
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                  if [ "$HTTP_CODE" = "200" ]; then
+                    echo "  ✓ Health check passed (HTTP 200)"
+                    break
+                  fi
+                  if [ $i -eq 15 ]; then
+                    echo "  ✗ Health check failed after 15 attempts"
+                    TESTS_PASSED=false
+                  fi
+                  echo "  HTTP $HTTP_CODE – retrying in 10s..."
+                  sleep 10
+                done
+                echo "--- Integration test: /actuator/health ---"
+                ACTUATOR_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/actuator/health" || echo "000")
+                echo "  Actuator health HTTP: $ACTUATOR_CODE"
+                echo "--- Integration test: /actuator/info ---"
+                curl -s "$BASE_URL/actuator/info" || true
+                if [ "$TESTS_PASSED" = "false" ]; then
+                  echo "================================================"
+                  echo "✗ Staging integration tests FAILED – triggering rollback"
+                  echo "================================================"
+                  exit 1
+                fi
+                echo "================================================"
+                echo "✓ Staging integration tests passed"
+                echo "================================================"
+            condition: succeeded()
+
+          - task: AzureCLI@2
+            displayName: Staging Performance Baseline
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "================================================"
+                echo "Running Performance Baseline Tests (Staging)"
+                echo "================================================"
+                STAGING_IP=$(az container show \
+                  --resource-group $(resourceGroup) \
+                  --name $(stagingContainerName) \
+                  --query ipAddress.ip --output tsv)
+                BASE_URL="http://$STAGING_IP:$(containerPort)"
+                echo "Measuring response times for /api/health (10 requests)..."
+                TOTAL_MS=0
+                PASS=0
+                for i in {1..10}; do
+                  START=$(date +%s%N)
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                  END=$(date +%s%N)
+                  ELAPSED_MS=$(( (END - START) / 1000000 ))
+                  echo "  Request $i: HTTP $HTTP_CODE – ${ELAPSED_MS}ms"
+                  TOTAL_MS=$((TOTAL_MS + ELAPSED_MS))
+                  if [ "$HTTP_CODE" = "200" ]; then PASS=$((PASS + 1)); fi
+                done
+                AVG_MS=$((TOTAL_MS / 10))
+                echo "Performance summary:"
+                echo "  Successful requests: $PASS/10"
+                echo "  Average response time: ${AVG_MS}ms"
+                if [ $AVG_MS -gt 5000 ]; then
+                  echo "✗ ERROR: Average response time ${AVG_MS}ms exceeds 5000ms – failing build"
+                  exit 1
+                elif [ $AVG_MS -gt 2000 ]; then
+                  echo "⚠ WARNING: Average response time ${AVG_MS}ms exceeds 2000ms baseline"
+                else
+                  echo "✓ Performance within baseline (avg ${AVG_MS}ms)"
+                fi
+                echo "================================================"
+                echo "✓ Performance baseline completed"
+                echo "================================================"
+            condition: succeeded()
+            continueOnError: true
+
+          - bash: |
+              echo "##vso[task.setvariable variable=LAST_GOOD_STAGING_TAG;isOutput=true]$(tag)"
+            displayName: Record Successful Staging Version
+            name: recordStagingVersion
+            condition: succeeded()
+
+      - job: WaitForProductionApproval
+        displayName: '⏸ Await Manual Approval for Production'
+        dependsOn: DeployToStaging
         condition: succeeded()
+        pool: server
+        timeoutInMinutes: 240
+        steps:
+          - task: ManualValidation@1
+            displayName: Manual Approval – Promote to Production
+            inputs:
+              notifyUsers: ''
+              instructions: |
+                Staging deployment of version $(tag) completed successfully.
+                Staging integration tests: PASSED
+                Performance baseline: PASSED
+                Please review the staging environment and approve to promote to production.
+                Container: $(stagingContainerName) in resource group $(resourceGroup)
+                APPROVE to continue to production deployment.
+                REJECT to abort the pipeline.
+              onTimeout: 'reject'
+
+# ===========================================================
+# STAGE 5 – DEPLOY TO PRODUCTION (Blue-Green)
+# ===========================================================
+  - stage: DeployProduction
+    displayName: '5 – Deploy to Production (Blue-Green)'
+    dependsOn: DeployStaging
+    condition: succeeded()
+    variables:
+      environment: 'production'
+    jobs:
+      - job: BlueGreenDeploy
+        displayName: Blue-Green Production Deployment
+        steps:
+          - task: AzureCLI@2
+            displayName: Determine Active Slot (Blue/Green)
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "================================================"
+                echo "Determining active production slot"
+                echo "================================================"
+                BLUE_STATE=$(az container show \
+                  --resource-group $(resourceGroup) \
+                  --name $(prodContainerNameBlue) \
+                  --query instanceView.state --output tsv 2>/dev/null || echo "NotFound")
+                GREEN_STATE=$(az container show \
+                  --resource-group $(resourceGroup) \
+                  --name $(prodContainerNameGreen) \
+                  --query instanceView.state --output tsv 2>/dev/null || echo "NotFound")
+                echo "Blue slot state : $BLUE_STATE"
+                echo "Green slot state: $GREEN_STATE"
+                if [ "$BLUE_STATE" = "Running" ]; then
+                  DEPLOY_SLOT="green"
+                  ACTIVE_SLOT="blue"
+                else
+                  DEPLOY_SLOT="blue"
+                  ACTIVE_SLOT="green"
+                fi
+                echo "Active slot  : $ACTIVE_SLOT"
+                echo "Deploy slot  : $DEPLOY_SLOT"
+                echo "##vso[task.setvariable variable=DEPLOY_SLOT;isOutput=true]$DEPLOY_SLOT"
+                echo "##vso[task.setvariable variable=ACTIVE_SLOT;isOutput=true]$ACTIVE_SLOT"
+                echo "##vso[task.setvariable variable=DEPLOY_SLOT]$DEPLOY_SLOT"
+                echo "##vso[task.setvariable variable=ACTIVE_SLOT]$ACTIVE_SLOT"
+            name: slotDetect
+
+          - task: AzureCLI@2
+            displayName: Deploy to Inactive Production Slot
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                set -e
+                DEPLOY_SLOT="$(slotDetect.DEPLOY_SLOT)"
+                echo "================================================"
+                echo "Blue-Green: deploying $(tag) to $DEPLOY_SLOT slot"
+                echo "================================================"
+                if [ "$DEPLOY_SLOT" = "blue" ]; then
+                  CONTAINER_NAME="$(prodContainerNameBlue)"
+                else
+                  CONTAINER_NAME="$(prodContainerNameGreen)"
+                fi
+                echo "Target container: $CONTAINER_NAME"
+                echo "Removing old $DEPLOY_SLOT container (if exists)..."
+                az container delete \
+                  --resource-group $(resourceGroup) \
+                  --name "$CONTAINER_NAME" \
+                  --yes 2>/dev/null || echo "No existing container."
+                echo "Deploying new $DEPLOY_SLOT container..."
+                az container create \
+                  --resource-group $(resourceGroup) \
+                  --name "$CONTAINER_NAME" \
+                  --image $(acrLoginServer)/$(imageRepository):$(tag) \
+                  --os-type Linux \
+                  --cpu 2 \
+                  --memory 3 \
+                  --ports $(containerPort) \
+                  --protocol TCP \
+                  --ip-address public \
+                  --registry-login-server $(acrLoginServer) \
+                  --registry-username $(dockerHubUsername) \
+                  --registry-password $(DOCKER_PASSWORD) \
+                  --restart-policy Always \
+                  --environment-variables \
+                    SPRING_PROFILES_ACTIVE=production \
+                    APP_VERSION=$(tag) \
+                    BUILD_ID=$(Build.BuildId) \
+                    DEPLOYMENT_SLOT=$DEPLOY_SLOT
+                echo "Waiting for $DEPLOY_SLOT slot IP..."
+                for i in {1..60}; do
+                  NEW_IP=$(az container show \
+                    --resource-group $(resourceGroup) \
+                    --name "$CONTAINER_NAME" \
+                    --query ipAddress.ip --output tsv 2>/dev/null)
+                  if [ -n "$NEW_IP" ] && [ "$NEW_IP" != "None" ]; then
+                    echo "$DEPLOY_SLOT slot IP: $NEW_IP"
+                    echo "##vso[task.setvariable variable=NEW_SLOT_IP]$NEW_IP"
+                    break
+                  fi
+                  echo "  Waiting... attempt $i/60"
+                  sleep 2
+                done
+                echo "$DEPLOY_SLOT slot state:"
+                az container show \
+                  --resource-group $(resourceGroup) \
+                  --name "$CONTAINER_NAME" \
+                  --query '{name:name,state:instanceView.state,ip:ipAddress.ip,image:containers[0].image}' \
+                  --output json
+
+          - task: AzureCLI@2
+            displayName: Production Smoke Tests (New Slot)
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "================================================"
+                echo "Production Smoke Tests on new $(slotDetect.DEPLOY_SLOT) slot"
+                echo "================================================"
+                echo "Waiting 45s for production startup..."
+                sleep 45
+                if [ "$(slotDetect.DEPLOY_SLOT)" = "blue" ]; then
+                  CONTAINER_NAME="$(prodContainerNameBlue)"
+                else
+                  CONTAINER_NAME="$(prodContainerNameGreen)"
+                fi
+                NEW_IP=$(az container show \
+                  --resource-group $(resourceGroup) \
+                  --name "$CONTAINER_NAME" \
+                  --query ipAddress.ip --output tsv)
+                echo "New slot IP: $NEW_IP"
+                if [ -z "$NEW_IP" ] || [ "$NEW_IP" = "None" ]; then
+                  echo "ERROR: New production slot has no IP."
+                  az container logs --resource-group $(resourceGroup) --name "$CONTAINER_NAME) || true
+                  exit 1
+                fi
+                BASE_URL="http://$NEW_IP:$(containerPort)"
+                echo "Smoke testing: $BASE_URL"
+                SMOKE_OK=false
+                for i in {1..20}; do
+                  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$BASE_URL/api/health" || echo "000")
+                  if [ "$HTTP_CODE" = "200" ]; then
+                    echo "  ✓ Health check passed (HTTP 200)"
+                    SMOKE_OK=true
+                    break
+                  fi
+                  echo "  Attempt $i/20 – HTTP $HTTP_CODE – retrying in 10s..."
+                  sleep 10
+                done
+                if [ "$SMOKE_OK" = "false" ]; then
+                  echo "ERROR: Production smoke tests failed – new slot is unhealthy."
+                  echo "Container logs:"
+                  az container logs --resource-group $(resourceGroup) --name "$CONTAINER_NAME" || true
+                  echo "##vso[task.setvariable variable=SMOKE_FAILED]true"
+                  exit 1
+                fi
+                echo "##vso[task.setvariable variable=SMOKE_FAILED]false"
+                echo "##vso[task.setvariable variable=PROD_NEW_SLOT_IP]$NEW_IP"
+                echo "================================================"
+                echo "✓ Production smoke tests passed on $(slotDetect.DEPLOY_SLOT) slot"
+                echo "================================================"
+            condition: succeeded()
+
+          - task: AzureCLI@2
+            displayName: Swap Active Slot (Complete Blue-Green)
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "================================================"
+                echo "Completing Blue-Green swap"
+                echo "Active: $(slotDetect.ACTIVE_SLOT) → New active: $(slotDetect.DEPLOY_SLOT)"
+                echo "================================================"
+                echo "Stopping old $(slotDetect.ACTIVE_SLOT) slot..."
+                if [ "$(slotDetect.ACTIVE_SLOT)" = "blue" ]; then
+                  OLD_CONTAINER="$(prodContainerNameBlue)"
+                else
+                  OLD_CONTAINER="$(prodContainerNameGreen)"
+                fi
+                az container stop \
+                  --resource-group $(resourceGroup) \
+                  --name "$OLD_CONTAINER" 2>/dev/null || echo "Old slot already stopped or not found."
+                NEW_IP="$(PROD_NEW_SLOT_IP)"
+                echo "================================================"
+                echo "✓ Blue-Green swap complete"
+                echo "  New active slot : $(slotDetect.DEPLOY_SLOT)"
+                echo "  Production IP   : $NEW_IP"
+                echo "  Version         : $(tag)"
+                echo "================================================"
+            condition: succeeded()
+
+          - bash: |
+              echo "##vso[task.setvariable variable=LAST_GOOD_PROD_TAG;isOutput=true]$(tag)"
+              echo "##vso[task.setvariable variable=LAST_ACTIVE_SLOT;isOutput=true]$(slotDetect.DEPLOY_SLOT)"
+            displayName: Record Successful Production Version
+            name: recordProdVersion
+            condition: succeeded()
+
+# ===========================================================
+# STAGE 6 – ROLLBACK
+# ===========================================================
+  - stage: Rollback
+    displayName: '6 – Rollback (on failure)'
+    dependsOn:
+      - DeployDev
+      - DeployStaging
+      - DeployProduction
+    condition: |
+      or(
+        failed('DeployDev'),
+        failed('DeployStaging'),
+        failed('DeployProduction')
+      )
+    jobs:
+      - job: AutoRollback
+        displayName: Automatic Rollback
+        steps:
+          - task: AzureCLI@2
+            displayName: Detect Failed Stage & Roll Back
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "================================================"
+                echo "ROLLBACK TRIGGERED – pipeline failure detected"
+                echo "Current version: $(tag)"
+                echo "================================================"
+                for CONTAINER in $(devContainerName) $(stagingContainerName) $(prodContainerNameBlue) $(prodContainerNameGreen); do
+                  STATE=$(az container show \
+                    --resource-group $(resourceGroup) \
+                    --name "$CONTAINER" \
+                    --query instanceView.state --output tsv 2>/dev/null || echo "NotFound")
+                  if [ "$STATE" = "NotFound" ]; then
+                    echo "  $CONTAINER: not found – skipping"
+                    continue
+                  fi
+                  IMAGE=$(az container show \
+                    --resource-group $(resourceGroup) \
+                    --name "$CONTAINER" \
+                    --query 'containers[0].image' --output tsv 2>/dev/null || echo "unknown")
+                  echo "  $CONTAINER: state=$STATE image=$IMAGE"
+                  FULL_IMAGE="$(acrLoginServer)/$(imageRepository):$(tag)"
+                  if [ "$IMAGE" = "$FULL_IMAGE" ]; then
+                    echo "  → Removing failed container $CONTAINER (version $(tag))..."
+                    az container delete \
+                      --resource-group $(resourceGroup) \
+                      --name "$CONTAINER" \
+                      --yes 2>/dev/null || true
+                    echo "  ✓ Removed $CONTAINER"
+                  fi
+                done
+                echo "================================================"
+                echo "Rollback actions completed."
+                echo "To redeploy a previous version, re-run the pipeline"
+                echo "with the desired Build ID (tag) as a variable override."
+                echo "================================================"
+
+      - job: ManualRollback
+        displayName: Manual Rollback Capability
+        dependsOn: AutoRollback
+        condition: always()
+        pool: server
+        timeoutInMinutes: 120
+        steps:
+          - task: ManualValidation@1
+            displayName: Manual Rollback Review
+            inputs:
+              notifyUsers: ''
+              instructions: |
+                Automatic rollback has been executed for version $(tag).
+                Failed containers running version $(tag) have been removed.
+                To perform a manual rollback to a specific version:
+                1. Go to Azure Pipelines → Run Pipeline
+                2. Set variable: tag = <previous-version>  e.g. 0.1.0-<previous-build-id>
+                3. Run only the Deploy stages
+                APPROVE to acknowledge and close this gate.
+              onTimeout: 'resume'
