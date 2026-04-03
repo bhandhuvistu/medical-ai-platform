@@ -19,7 +19,7 @@ pr:
       - main
 
 pool:
-  vmImage: 'ubuntu-latest'
+  name: 'Default'
 
 # ── Global variables ──────────────────────────────────────
 variables:
