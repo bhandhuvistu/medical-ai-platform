@@ -28,7 +28,10 @@ variables:
   imageRepository: 'bhandhuvistu/medical-ai-platform'
   containerRegistry: 'docker.io'
   dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
-  
+  dockerHubUsername: 'bhandhuvistu'
+  # DOCKER_PASSWORD must be set as a secret variable in the Azure Pipelines UI
+  # (Pipelines → Edit → Variables → New variable, enable "Keep this value secret")
+
   # Versioning: <semver>-<buildId>  e.g. 0.1.0-42
   appVersion: '0.1.0'
   tag: '$(appVersion)-$(Build.BuildId)'
